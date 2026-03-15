@@ -6,7 +6,7 @@ import {
 // ── State ──────────────────────────────────────────────────
 let currentScreen = 'home';
 let runState = {
-  running: false, elapsed: 0, distance: 0, captureProgress: 12,
+  running: false, paused: false, elapsed: 0, distance: 0, captureProgress: 12,
   timerId: null, gpsWatchId: null, lastPos: null, gpsActive: false, gpsError: false,
   capturedCells: new Set(), totalCaptured: 0,
   pace: '--:--', calories: 0
@@ -283,7 +283,7 @@ function renderMap() {
     <div class="run-controls" id="run-controls">
       ${isR ? `
         <div class="run-btn-row">
-          <button class="run-btn run-btn-pause">⏸ Pause</button>
+          <button class="run-btn run-btn-pause" id="btn-pause-run">${runState.paused ? '▶ Resume' : '⏸ Pause'}</button>
           <button class="run-btn run-btn-end" id="btn-end-run">⏹ End Run</button>
         </div>
       ` : `
@@ -313,8 +313,22 @@ function drawTerritories(cLat, cLon) {
 function initMapInteractions() {
   const s = document.getElementById('btn-start-run');
   const e = document.getElementById('btn-end-run');
+  const p = document.getElementById('btn-pause-run');
   if (s) s.addEventListener('click', startRun);
   if (e) e.addEventListener('click', () => { stopRun(); navigateTo('map'); });
+  if (p) {
+    p.addEventListener('click', (ev) => {
+      runState.paused = !runState.paused;
+      ev.target.innerHTML = runState.paused ? '▶ Resume' : '⏸ Pause';
+      if (runState.paused) {
+        ev.target.style.background = 'var(--orange-bg)';
+        ev.target.style.color = 'var(--orange)';
+      } else {
+        ev.target.style.background = '';
+        ev.target.style.color = '';
+      }
+    });
+  }
 
   // Initialize Leaflet Map
   const mapEl = document.getElementById('leaflet-map');
@@ -337,7 +351,7 @@ function initMapInteractions() {
 }
 
 function startRun() {
-  runState.running = true; runState.elapsed = 0; runState.distance = 0;
+  runState.running = true; runState.paused = false; runState.elapsed = 0; runState.distance = 0;
   runState.captureProgress = 0; runState.lastPos = null;
   runState.gpsActive = false; runState.gpsError = false;
   runState.capturedCells = new Set(); runState.totalCaptured = 0;
@@ -348,6 +362,7 @@ function startRun() {
   if ('geolocation' in navigator) {
     runState.gpsWatchId = navigator.geolocation.watchPosition(
       (pos) => {
+        if (runState.paused) return; // ignore tracking if paused
         runState.gpsActive = true; runState.gpsError = false;
         const { latitude, longitude } = pos.coords;
         if (runState.lastPos) {
@@ -395,14 +410,24 @@ function startRun() {
       (err) => {
         runState.gpsError = true; runState.gpsActive = false;
         const gpsEl = document.getElementById('gps-indicator');
-        if (gpsEl) { gpsEl.className = 'gps-status gps-error'; gpsEl.innerHTML = `<div class="gps-dot"></div>GPS unavailable — using simulation`; }
+        if (gpsEl) { 
+          gpsEl.className = 'gps-status gps-error'; 
+          gpsEl.innerHTML = `<div class="gps-dot"></div>GPS Error / HTTPS Required (Simulation active)`; 
+        }
+        if (err.code === err.PERMISSION_DENIED) {
+           showToast('⚠️', 'GPS Permission Denied', 'If on mobile, enable GPS and ensure site uses HTTPS.');
+        }
       },
       { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 }
     );
+  } else {
+    runState.gpsError = true;
+    showToast('⚠️', 'GPS Unsupported', 'Geolocation API not supported in this browser (or requires HTTPS).');
   }
 
   // Timer for elapsed time + fallback simulation when GPS is unavailable
   runState.timerId = setInterval(() => {
+    if (runState.paused) return; // stop all logic if paused
     runState.elapsed++;
     runState.pace = calcPace(runState.distance, runState.elapsed);
     // Fallback: if no GPS after 5s, simulate movement
