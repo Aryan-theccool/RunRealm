@@ -15,6 +15,10 @@ let rankTab = 'Global';
 let subscribed = false;
 let selectedTheme = 1;
 
+let mapInstance = null;
+let userMarker = null;
+let mapPolygons = [];
+
 // ── Init ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   renderTabBar();
@@ -221,22 +225,7 @@ function renderHome() {
 // ══════════════════════════════════════════════════════════
 // MAP SCREEN
 // ══════════════════════════════════════════════════════════
-function generateGrid() {
-  const grid = [];
-  for (let r = 0; r < 7; r++) {
-    const row = [];
-    for (let c = 0; c < 7; c++) {
-      const isOwned = (r===3&&c===3)||(r===3&&c===4)||(r===4&&c===3);
-      const isNearby = Math.random() > 0.6;
-      row.push({ id: `${r}-${c}`, row: r, col: c, owned: isOwned, partial: !isOwned && isNearby && Math.random() > 0.5, enemy: !isOwned && Math.random() > 0.8 });
-    }
-    grid.push(row);
-  }
-  return grid;
-}
-
 function renderMap() {
-  const grid = generateGrid();
   const isR = runState.running;
   return `
     <div class="flex flex-row justify-between items-center mb-3" style="padding-bottom:10px;border-bottom:1px solid var(--border)">
@@ -248,23 +237,12 @@ function renderMap() {
       <button class="notif-btn">⚙️</button>
     </div>
 
-    <div class="card" style="padding:0;overflow:hidden">
-      <div class="map-legend">
+    <div class="card" style="padding:0;overflow:hidden;position:relative;z-index:1;">
+      <div id="leaflet-map" style="width:100%;height:320px;z-index:1;"></div>
+      <div class="map-legend" style="position:absolute;bottom:10px;left:10px;right:10px;z-index:1000;background:rgba(10,10,15,0.85);backdrop-filter:blur(8px);border-radius:12px;padding:8px;border:1px solid rgba(255,107,0,0.2);display:flex;justify-content:space-around;">
         <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div>Your Zone</div>
         <div class="legend-item"><div class="legend-dot" style="background:rgba(59,130,246,0.6)"></div>Nearby</div>
         <div class="legend-item"><div class="legend-dot" style="background:rgba(239,68,68,0.6)"></div>Enemy</div>
-        <div class="legend-item"><div class="legend-dot" style="background:var(--card)"></div>Neutral</div>
-      </div>
-      <div class="map-grid">
-        ${grid.map(row => `<div class="map-row">${row.map(cell => {
-          let cls = 'map-cell map-cell-neutral';
-          let content = '';
-          if (cell.owned) cls = 'map-cell map-cell-owned';
-          else if (cell.enemy) { cls = 'map-cell map-cell-enemy'; content = '⚔️'; }
-          else if (cell.partial) cls = 'map-cell map-cell-partial';
-          if (cell.row===3 && cell.col===3) { cls += ' map-cell-center' + (isR ? ' pulsing' : ''); content = isR ? '📍' : '🏰'; }
-          return `<div class="${cls}">${content}</div>`;
-        }).join('')}</div>`).join('')}
       </div>
     </div>
 
@@ -315,11 +293,47 @@ function renderMap() {
   `;
 }
 
+function drawTerritories(cLat, cLon) {
+  mapPolygons.forEach(p => p.remove());
+  mapPolygons = [];
+  const offset = 0.005;
+  const zones = [
+    { coords: [[cLat-offset, cLon-offset], [cLat+offset, cLon-offset], [cLat+offset, cLon+offset], [cLat-offset, cLon+offset]], color: '#ff6b00', fillOpacity: 0.35, border: '#ff8a33' },
+    { coords: [[cLat-offset, cLon+offset*1.1], [cLat+offset, cLon+offset*1.1], [cLat+offset, cLon+offset*3], [cLat-offset, cLon+offset*3]], color: '#ef4444', fillOpacity: 0.25, border: '#f87171' },
+    { coords: [[cLat+offset*1.1, cLon-offset], [cLat+offset*3, cLon-offset], [cLat+offset*3, cLon+offset], [cLat+offset*1.1, cLon+offset]], color: '#3b82f6', fillOpacity: 0.25, border: '#60a5fa' }
+  ];
+  zones.forEach(z => {
+    const polygon = L.polygon(z.coords, {
+      color: z.border, weight: 2, fillColor: z.color, fillOpacity: z.fillOpacity, className: 'territory-polygon'
+    }).addTo(mapInstance);
+    mapPolygons.push(polygon);
+  });
+}
+
 function initMapInteractions() {
   const s = document.getElementById('btn-start-run');
   const e = document.getElementById('btn-end-run');
   if (s) s.addEventListener('click', startRun);
   if (e) e.addEventListener('click', () => { stopRun(); navigateTo('map'); });
+
+  // Initialize Leaflet Map
+  const mapEl = document.getElementById('leaflet-map');
+  if (mapEl && window.L) {
+    if (mapInstance) { mapInstance.remove(); }
+    const centerLat = runState.lastPos ? runState.lastPos.lat : 40.7829;
+    const centerLon = runState.lastPos ? runState.lastPos.lon : -73.9654;
+    
+    mapInstance = L.map('leaflet-map', { zoomControl: false, attributionControl: false }).setView([centerLat, centerLon], 15);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd', maxZoom: 20
+    }).addTo(mapInstance);
+
+    drawTerritories(centerLat, centerLon);
+
+    const markerHtml = `<div style="width:16px;height:16px;background:var(--orange);border-radius:50%;border:2px solid #fff;box-shadow:0 0 15px var(--orange);animation:pulse 2s infinite"></div>`;
+    const userIcon = L.divIcon({ html: markerHtml, className: '', iconSize: [16, 16], iconAnchor: [8, 8] });
+    userMarker = L.marker([centerLat, centerLon], { icon: userIcon }).addTo(mapInstance);
+  }
 }
 
 function startRun() {
@@ -354,18 +368,25 @@ function startRun() {
               // Update territory strengths
               territories.forEach((t, idx) => { t.strength = Math.min(t.strength + diff * 3, 100); });
               showToast('🏴', 'Territory Strengthened!', `+${diff*3}% strength · ${runState.distance.toFixed(1)} km run`);
-              // Capture a grid cell
-              const uncaptured = document.querySelectorAll('.map-cell-neutral, .map-cell-partial');
-              if (uncaptured.length > 0) {
-                const cell = uncaptured[Math.floor(Math.random() * uncaptured.length)];
-                cell.className = 'map-cell map-cell-owned';
-                cell.textContent = '🏴';
-                cell.style.animation = 'popIn 0.4s ease-out';
+              // Capture a territory cell on real map
+              if (mapInstance && userMarker) {
+                const pLat = runState.lastPos.lat + (Math.random()-0.5)*0.004;
+                const pLon = runState.lastPos.lon + (Math.random()-0.5)*0.004;
+                const cOff = 0.0008;
+                const newPoly = L.polygon([
+                  [pLat-cOff, pLon-cOff], [pLat+cOff, pLon-cOff],
+                  [pLat+cOff, pLon+cOff], [pLat-cOff, pLon+cOff]
+                ], { color: '#ff8a33', weight: 2, fillColor: '#ff6b00', fillOpacity: 0.4 }).addTo(mapInstance);
+                mapPolygons.push(newPoly);
               }
             }
           }
         }
         runState.lastPos = { lat: latitude, lon: longitude };
+        if (mapInstance && userMarker) {
+          userMarker.setLatLng([latitude, longitude]);
+          mapInstance.panTo([latitude, longitude]);
+        }
         // Update GPS status indicator
         const gpsEl = document.getElementById('gps-indicator');
         if (gpsEl) gpsEl.innerHTML = `<div class="gps-dot"></div>GPS Active · ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
@@ -389,18 +410,30 @@ function startRun() {
       runState.distance = +(runState.distance + 0.002 + Math.random()*0.002).toFixed(3);
       runState.captureProgress = Math.min(runState.captureProgress + 0.3, 100);
       runState.calories = Math.round(runState.distance * 60);
+      
+      if(!runState.lastPos) runState.lastPos = {lat: 40.7829, lon: -73.9654};
+      runState.lastPos.lat += 0.00005;
+      runState.lastPos.lon += 0.00008;
+      if (mapInstance && userMarker) {
+        userMarker.setLatLng([runState.lastPos.lat, runState.lastPos.lon]);
+        mapInstance.panTo([runState.lastPos.lat, runState.lastPos.lon]);
+      }
+
       const newCells = Math.floor(runState.distance / 0.2);
       if (newCells > runState.totalCaptured) {
         const diff = newCells - runState.totalCaptured;
         runState.totalCaptured = newCells;
         territories.forEach(t => { t.strength = Math.min(t.strength + diff * 3, 100); });
         showToast('🏴', 'Territory Strengthened!', `+${diff*3}% strength · ${runState.distance.toFixed(1)} km run`);
-        const uncaptured = document.querySelectorAll('.map-cell-neutral, .map-cell-partial');
-        if (uncaptured.length > 0) {
-          const cell = uncaptured[Math.floor(Math.random() * uncaptured.length)];
-          cell.className = 'map-cell map-cell-owned';
-          cell.textContent = '🏴';
-          cell.style.animation = 'popIn 0.4s ease-out';
+        if (mapInstance && userMarker) {
+          const pLat = runState.lastPos.lat + (Math.random()-0.5)*0.004;
+          const pLon = runState.lastPos.lon + (Math.random()-0.5)*0.004;
+          const cOff = 0.0008;
+          const newPoly = L.polygon([
+            [pLat-cOff, pLon-cOff], [pLat+cOff, pLon-cOff],
+            [pLat+cOff, pLon+cOff], [pLat-cOff, pLon+cOff]
+          ], { color: '#ff8a33', weight: 2, fillColor: '#ff6b00', fillOpacity: 0.4 }).addTo(mapInstance);
+          mapPolygons.push(newPoly);
         }
       }
     }
