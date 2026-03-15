@@ -5,7 +5,12 @@ import {
 
 // ── State ──────────────────────────────────────────────────
 let currentScreen = 'home';
-let runState = { running: false, elapsed: 0, distance: 0, captureProgress: 12, timerId: null };
+let runState = {
+  running: false, elapsed: 0, distance: 0, captureProgress: 12,
+  timerId: null, gpsWatchId: null, lastPos: null, gpsActive: false, gpsError: false,
+  capturedCells: new Set(), totalCaptured: 0,
+  pace: '--:--', calories: 0
+};
 let rankTab = 'Global';
 let subscribed = false;
 let selectedTheme = 1;
@@ -70,6 +75,34 @@ function strengthColor(s) {
   if (s > 70) return 'progress-fill-green';
   if (s > 40) return '';
   return 'progress-fill-red';
+}
+
+// Haversine distance between two GPS coords in km
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2-lat1)*Math.PI/180;
+  const dLon = (lon2-lon1)*Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// Calculate pace from distance/time
+function calcPace(distKm, elapsedS) {
+  if (distKm <= 0) return '--:--';
+  const paceS = elapsedS / distKm;
+  const m = Math.floor(paceS/60), s = Math.floor(paceS%60);
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+// Show toast notification
+function showToast(icon, title, msg) {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.innerHTML = `<div class="toast-icon">${icon}</div><div class="flex-1"><div class="font-bold text-sm">${title}</div><div class="text-xs text-muted mt-1">${msg}</div></div>`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -236,11 +269,14 @@ function renderMap() {
     </div>
 
     ${isR ? `
+      <div class="flex flex-row justify-between items-center mb-3">
+        <div id="gps-indicator" class="gps-status ${runState.gpsActive ? '' : runState.gpsError ? 'gps-error' : ''}"><div class="gps-dot"></div>${runState.gpsActive ? 'GPS Active' : runState.gpsError ? 'GPS unavailable — using simulation' : 'Acquiring GPS...'}</div>
+      </div>
       <div class="card live-stats">
         <div class="flex flex-row mb-3">
-          <div class="live-stat-item"><div class="live-stat-value" id="run-dist">${runState.distance.toFixed(1)} km</div><div class="live-stat-label">Distance</div></div>
-          <div class="live-stat-item"><div class="live-stat-value">5:12</div><div class="live-stat-label">Pace /km</div></div>
-          <div class="live-stat-item"><div class="live-stat-value text-orange">CP North</div><div class="live-stat-label">Sector</div></div>
+          <div class="live-stat-item"><div class="live-stat-value" id="run-dist">${runState.distance.toFixed(2)} km</div><div class="live-stat-label">Distance</div></div>
+          <div class="live-stat-item"><div class="live-stat-value" id="run-pace">${runState.pace}</div><div class="live-stat-label">Pace /km</div></div>
+          <div class="live-stat-item"><div class="live-stat-value" id="run-cal">${runState.calories}</div><div class="live-stat-label">Calories</div></div>
         </div>
         <div class="capture-box">
           <div class="flex flex-row justify-between mb-1">
@@ -287,20 +323,119 @@ function initMapInteractions() {
 }
 
 function startRun() {
-  runState.running = true; runState.elapsed = 0; runState.distance = 0; runState.captureProgress = 12;
+  runState.running = true; runState.elapsed = 0; runState.distance = 0;
+  runState.captureProgress = 0; runState.lastPos = null;
+  runState.gpsActive = false; runState.gpsError = false;
+  runState.capturedCells = new Set(); runState.totalCaptured = 0;
+  runState.pace = '--:--'; runState.calories = 0;
   navigateTo('map');
+
+  // Start GPS tracking
+  if ('geolocation' in navigator) {
+    runState.gpsWatchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        runState.gpsActive = true; runState.gpsError = false;
+        const { latitude, longitude } = pos.coords;
+        if (runState.lastPos) {
+          const d = haversine(runState.lastPos.lat, runState.lastPos.lon, latitude, longitude);
+          if (d > 0.001 && d < 0.5) { // filter GPS noise, ignore jumps > 500m
+            runState.distance = +(runState.distance + d).toFixed(3);
+            runState.captureProgress = Math.min(runState.captureProgress + d * 50, 100); // 2km to capture
+            runState.calories = Math.round(runState.distance * 60);
+            // Territory capture logic — every 0.2km run captures a territory cell
+            const newCells = Math.floor(runState.distance / 0.2);
+            if (newCells > runState.totalCaptured) {
+              const diff = newCells - runState.totalCaptured;
+              runState.totalCaptured = newCells;
+              for (let i = 0; i < diff; i++) {
+                const cellId = `cap-${runState.totalCaptured - diff + i}`;
+                runState.capturedCells.add(cellId);
+              }
+              // Update territory strengths
+              territories.forEach((t, idx) => { t.strength = Math.min(t.strength + diff * 3, 100); });
+              showToast('🏴', 'Territory Strengthened!', `+${diff*3}% strength · ${runState.distance.toFixed(1)} km run`);
+              // Capture a grid cell
+              const uncaptured = document.querySelectorAll('.map-cell-neutral, .map-cell-partial');
+              if (uncaptured.length > 0) {
+                const cell = uncaptured[Math.floor(Math.random() * uncaptured.length)];
+                cell.className = 'map-cell map-cell-owned';
+                cell.textContent = '🏴';
+                cell.style.animation = 'popIn 0.4s ease-out';
+              }
+            }
+          }
+        }
+        runState.lastPos = { lat: latitude, lon: longitude };
+        // Update GPS status indicator
+        const gpsEl = document.getElementById('gps-indicator');
+        if (gpsEl) gpsEl.innerHTML = `<div class="gps-dot"></div>GPS Active · ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+        if (gpsEl) { gpsEl.className = 'gps-status'; }
+      },
+      (err) => {
+        runState.gpsError = true; runState.gpsActive = false;
+        const gpsEl = document.getElementById('gps-indicator');
+        if (gpsEl) { gpsEl.className = 'gps-status gps-error'; gpsEl.innerHTML = `<div class="gps-dot"></div>GPS unavailable — using simulation`; }
+      },
+      { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 }
+    );
+  }
+
+  // Timer for elapsed time + fallback simulation when GPS is unavailable
   runState.timerId = setInterval(() => {
-    runState.elapsed++; runState.distance = +(runState.distance + 0.003).toFixed(3); runState.captureProgress = Math.min(runState.captureProgress + 0.4, 100);
-    const t = document.getElementById('run-timer'), d = document.getElementById('run-dist'), p = document.getElementById('capture-pct'), b = document.getElementById('capture-bar'), r = document.getElementById('capture-remaining');
+    runState.elapsed++;
+    runState.pace = calcPace(runState.distance, runState.elapsed);
+    // Fallback: if no GPS after 5s, simulate movement
+    if (!runState.gpsActive && runState.elapsed > 5) {
+      runState.distance = +(runState.distance + 0.002 + Math.random()*0.002).toFixed(3);
+      runState.captureProgress = Math.min(runState.captureProgress + 0.3, 100);
+      runState.calories = Math.round(runState.distance * 60);
+      const newCells = Math.floor(runState.distance / 0.2);
+      if (newCells > runState.totalCaptured) {
+        const diff = newCells - runState.totalCaptured;
+        runState.totalCaptured = newCells;
+        territories.forEach(t => { t.strength = Math.min(t.strength + diff * 3, 100); });
+        showToast('🏴', 'Territory Strengthened!', `+${diff*3}% strength · ${runState.distance.toFixed(1)} km run`);
+        const uncaptured = document.querySelectorAll('.map-cell-neutral, .map-cell-partial');
+        if (uncaptured.length > 0) {
+          const cell = uncaptured[Math.floor(Math.random() * uncaptured.length)];
+          cell.className = 'map-cell map-cell-owned';
+          cell.textContent = '🏴';
+          cell.style.animation = 'popIn 0.4s ease-out';
+        }
+      }
+    }
+    // Update UI elements
+    const t = document.getElementById('run-timer'), d = document.getElementById('run-dist');
+    const p = document.getElementById('capture-pct'), b = document.getElementById('capture-bar');
+    const r = document.getElementById('capture-remaining'), pc = document.getElementById('run-pace');
+    const cal = document.getElementById('run-cal');
     if (t) t.textContent = fmtTime(runState.elapsed);
-    if (d) d.textContent = `${runState.distance.toFixed(1)} km`;
+    if (d) d.textContent = `${runState.distance.toFixed(2)} km`;
     if (p) p.textContent = `${runState.captureProgress.toFixed(0)}%`;
     if (b) b.style.width = `${runState.captureProgress}%`;
     if (r) r.textContent = `${(100-runState.captureProgress).toFixed(0)}% remaining to capture`;
+    if (pc) pc.textContent = runState.pace;
+    if (cal) cal.textContent = runState.calories;
+    // Check if sector fully captured
+    if (runState.captureProgress >= 100 && !runState._sectorCaptured) {
+      runState._sectorCaptured = true;
+      showToast('🏰', 'SECTOR CAPTURED!', 'Central Park North · Zone 4 is now yours! +500 XP');
+    }
   }, 1000);
 }
 
-function stopRun() { runState.running = false; clearInterval(runState.timerId); runState.timerId = null; }
+function stopRun() {
+  runState.running = false;
+  clearInterval(runState.timerId); runState.timerId = null;
+  if (runState.gpsWatchId !== null) {
+    navigator.geolocation.clearWatch(runState.gpsWatchId);
+    runState.gpsWatchId = null;
+  }
+  runState._sectorCaptured = false;
+  if (runState.distance > 0) {
+    showToast('🏃', 'Run Complete!', `${runState.distance.toFixed(2)} km · ${fmtTime(runState.elapsed)} · +${Math.round(runState.distance * 25)} XP`);
+  }
+}
 
 // ══════════════════════════════════════════════════════════
 // RANK SCREEN
@@ -450,7 +585,7 @@ function renderPlus() {
 
 function initPlusInteractions() {
   document.querySelectorAll('#btn-subscribe, #btn-subscribe-sticky').forEach(btn => {
-    if (btn) btn.addEventListener('click', () => { subscribed = true; navigateTo('plus'); });
+    if (btn) btn.addEventListener('click', () => showPaymentModal());
   });
   document.querySelectorAll('#theme-grid .theme-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -459,6 +594,131 @@ function initPlusInteractions() {
       navigateTo('plus');
     });
   });
+}
+
+// ══════════════════════════════════════════════════════════
+// PAYMENT MODAL (no API — simulated flow)
+// ══════════════════════════════════════════════════════════
+function showPaymentModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'payment-modal';
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <button class="modal-close" id="modal-close-btn">✕</button>
+      <div class="modal-header">
+        <div class="emoji-lg mb-2">🏰</div>
+        <div class="text-lg font-bold">RunRealm Plus</div>
+        <div class="text-xs text-muted mt-1">₹199/mo · 7-day free trial</div>
+      </div>
+      <div id="payment-form-content">
+        <div class="form-group">
+          <label class="form-label">Card Number</label>
+          <input class="form-input" id="card-number" type="text" placeholder="4242 4242 4242 4242" maxlength="19" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Cardholder Name</label>
+          <input class="form-input" id="card-name" type="text" placeholder="Your Name" autocomplete="off">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Expiry</label>
+            <input class="form-input" id="card-expiry" type="text" placeholder="MM/YY" maxlength="5" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label class="form-label">CVV</label>
+            <input class="form-input" id="card-cvv" type="text" placeholder="123" maxlength="3" autocomplete="off">
+          </div>
+        </div>
+        <button class="pay-btn" id="pay-now-btn">Pay ₹199 — Start Trial</button>
+        <div class="pay-secure">🔒 Payments are secure and encrypted</div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // Card number formatting
+  const cardInput = document.getElementById('card-number');
+  cardInput.addEventListener('input', (e) => {
+    let v = e.target.value.replace(/\D/g, '').substring(0, 16);
+    e.target.value = v.replace(/(\d{4})(?=\d)/g, '$1 ');
+  });
+
+  // Expiry formatting
+  const expiryInput = document.getElementById('card-expiry');
+  expiryInput.addEventListener('input', (e) => {
+    let v = e.target.value.replace(/\D/g, '').substring(0, 4);
+    if (v.length >= 2) v = v.substring(0,2) + '/' + v.substring(2);
+    e.target.value = v;
+  });
+
+  // CVV - numbers only
+  document.getElementById('card-cvv').addEventListener('input', (e) => {
+    e.target.value = e.target.value.replace(/\D/g, '').substring(0, 3);
+  });
+
+  // Close modal
+  document.getElementById('modal-close-btn').addEventListener('click', closePaymentModal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closePaymentModal(); });
+
+  // Pay button
+  document.getElementById('pay-now-btn').addEventListener('click', processPayment);
+}
+
+function processPayment() {
+  const btn = document.getElementById('pay-now-btn');
+  const name = document.getElementById('card-name').value.trim();
+  const card = document.getElementById('card-number').value.replace(/\s/g, '');
+  const expiry = document.getElementById('card-expiry').value;
+  const cvv = document.getElementById('card-cvv').value;
+
+  // Basic validation
+  if (!name || card.length < 16 || expiry.length < 5 || cvv.length < 3) {
+    btn.textContent = 'Please fill all fields';
+    btn.style.background = 'var(--red-bg)';
+    btn.style.color = 'var(--red)';
+    setTimeout(() => {
+      btn.textContent = 'Pay ₹199 — Start Trial';
+      btn.style.background = ''; btn.style.color = '';
+    }, 2000);
+    return;
+  }
+
+  // Simulate processing
+  btn.disabled = true;
+  btn.textContent = 'Processing...';
+
+  setTimeout(() => {
+    // Show success
+    const formContent = document.getElementById('payment-form-content');
+    const confetti = ['🎉','⭐','🏰','🎊','✨','🔥'].map((e, i) =>
+      `<div class="confetti-particle" style="left:${20+i*12}%;top:${30+Math.random()*20}%;animation-delay:${i*0.1}s">${e}</div>`
+    ).join('');
+    formContent.innerHTML = `
+      ${confetti}
+      <div class="payment-success">
+        <div class="success-check">✓</div>
+        <div class="text-xl font-bold mb-1">Welcome to RunRealm Plus!</div>
+        <div class="text-sm text-muted mb-3">Your 7-day free trial has started</div>
+        <div class="card" style="text-align:left">
+          <div class="flex flex-row justify-between mb-1"><span class="text-xs text-muted">Plan</span><span class="text-xs font-semibold">Monthly · ₹199/mo</span></div>
+          <div class="flex flex-row justify-between mb-1"><span class="text-xs text-muted">Trial ends</span><span class="text-xs font-semibold">Mar 22, 2026</span></div>
+          <div class="flex flex-row justify-between"><span class="text-xs text-muted">Card</span><span class="text-xs font-semibold">•••• ${card.slice(-4)}</span></div>
+        </div>
+        <button class="cta-btn mt-3" id="start-plus-btn"><span>Start Exploring Plus</span></button>
+      </div>
+    `;
+    subscribed = true;
+    document.getElementById('start-plus-btn').addEventListener('click', () => {
+      closePaymentModal();
+      navigateTo('plus');
+    });
+  }, 2000);
+}
+
+function closePaymentModal() {
+  const modal = document.getElementById('payment-modal');
+  if (modal) modal.remove();
 }
 
 // ══════════════════════════════════════════════════════════

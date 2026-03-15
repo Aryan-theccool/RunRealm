@@ -801,6 +801,188 @@ body {
 .screen::-webkit-scrollbar-track { background: transparent; }
 .screen::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
+/* ── Payment Modal ── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200;
+  animation: fadeIn 0.25s ease-out;
+  padding: 16px;
+}
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalSlideUp { from { opacity: 0; transform: translateY(30px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes checkmark { 0% { transform: scale(0) rotate(-45deg); opacity: 0; } 50% { transform: scale(1.2) rotate(-45deg); } 100% { transform: scale(1) rotate(-45deg); opacity: 1; } }
+@keyframes confetti { 0% { transform: translateY(0) rotate(0); opacity: 1; } 100% { transform: translateY(-60px) rotate(720deg); opacity: 0; } }
+
+.modal-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  width: 100%;
+  max-width: 380px;
+  padding: 24px;
+  animation: modalSlideUp 0.35s ease-out;
+  position: relative;
+}
+
+.modal-close {
+  position: absolute; top: 16px; right: 16px;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: var(--transition);
+}
+.modal-close:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
+.modal-header {
+  text-align: center;
+  margin-bottom: 20px;
+  padding-right: 32px;
+}
+
+.form-group { margin-bottom: 14px; }
+
+.form-label {
+  display: block;
+  font-size: 0.7rem; font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  transition: var(--transition);
+  outline: none;
+}
+
+.form-input:focus { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(249,115,22,0.15); }
+.form-input::placeholder { color: var(--text-dim); }
+
+.form-row { display: flex; gap: 10px; }
+.form-row .form-group { flex: 1; }
+
+.pay-btn {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+  color: #fff;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: var(--transition);
+  box-shadow: 0 4px 20px var(--orange-glow);
+  margin-top: 6px;
+}
+.pay-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 28px var(--orange-glow); }
+.pay-btn:active { transform: translateY(0); }
+.pay-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+.pay-secure {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  margin-top: 12px;
+  font-size: 0.65rem; color: var(--text-dim);
+}
+
+.payment-success {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.success-check {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--green), #16a34a);
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 16px;
+  font-size: 2rem;
+  animation: popIn 0.5s ease-out;
+  box-shadow: 0 0 30px rgba(74,222,128,0.3);
+}
+
+.confetti-particle {
+  position: absolute;
+  font-size: 1.2rem;
+  animation: confetti 1.5s ease-out forwards;
+}
+
+/* ── GPS Status ── */
+.gps-status {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  background: rgba(74,222,128,0.1);
+  border: 1px solid rgba(74,222,128,0.2);
+  border-radius: var(--radius-full);
+  font-size: 0.65rem; font-weight: 600;
+  color: var(--green);
+}
+
+.gps-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 2s infinite;
+  box-shadow: 0 0 6px rgba(74,222,128,0.5);
+}
+
+.gps-error {
+  background: rgba(239,68,68,0.1);
+  border-color: rgba(239,68,68,0.2);
+  color: var(--red);
+}
+
+.gps-error .gps-dot {
+  background: var(--red);
+  box-shadow: 0 0 6px rgba(239,68,68,0.5);
+  animation: none;
+}
+
+/* ── Toast Notification ── */
+.toast {
+  position: fixed;
+  top: 20px;
+  left: 50%; transform: translateX(-50%);
+  max-width: calc(var(--max-w) - 32px);
+  width: calc(100% - 32px);
+  padding: 14px 18px;
+  background: var(--card);
+  border: 1px solid var(--orange);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 20px var(--orange-glow);
+  z-index: 300;
+  animation: fadeSlideIn 0.4s ease-out;
+  display: flex; align-items: center; gap: 12px;
+}
+
+.toast-icon {
+  width: 40px; height: 40px;
+  border-radius: var(--radius-sm);
+  background: var(--orange-bg);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+
 /* ── Responsive ── */
 @media (min-width: 768px) {
   #app { box-shadow: 0 0 60px rgba(0,0,0,0.5); }
