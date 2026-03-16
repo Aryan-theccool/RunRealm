@@ -9,7 +9,8 @@ let runState = {
   running: false, paused: false, elapsed: 0, distance: 0, captureProgress: 12,
   timerId: null, gpsWatchId: null, lastPos: null, gpsActive: false, gpsError: false,
   capturedCells: new Set(), totalCaptured: 0,
-  pace: '--:--', calories: 0
+  pace: '--:--', calories: 0,
+  pathCoords: [], routeLine: null
 };
 let rankTab = 'Global';
 let subscribed = false;
@@ -299,12 +300,42 @@ function renderMap() {
 function drawTerritories(cLat, cLon) {
   mapPolygons.forEach(p => p.remove());
   mapPolygons = [];
-  const offset = 0.005;
+  const off = 0.006;
+  
+  // Create natural-looking irregular polygons (geofence style) relative to user center
   const zones = [
-    { coords: [[cLat-offset, cLon-offset], [cLat+offset, cLon-offset], [cLat+offset, cLon+offset], [cLat-offset, cLon+offset]], color: '#ff6b00', fillOpacity: 0.35, border: '#ff8a33' },
-    { coords: [[cLat-offset, cLon+offset*1.1], [cLat+offset, cLon+offset*1.1], [cLat+offset, cLon+offset*3], [cLat-offset, cLon+offset*3]], color: '#ef4444', fillOpacity: 0.25, border: '#f87171' },
-    { coords: [[cLat+offset*1.1, cLon-offset], [cLat+offset*3, cLon-offset], [cLat+offset*3, cLon+offset], [cLat+offset*1.1, cLon+offset]], color: '#3b82f6', fillOpacity: 0.25, border: '#60a5fa' }
+    { 
+      // User's Zone (Irregular central shape)
+      coords: [
+        [cLat + off*0.2, cLon - off*0.8], [cLat + off*0.9, cLon - off*0.4], 
+        [cLat + off*1.1, cLon + off*0.3], [cLat + off*0.6, cLon + off*0.9], 
+        [cLat - off*0.3, cLon + off*1.2], [cLat - off*0.8, cLon + off*0.4], 
+        [cLat - off*0.7, cLon - off*0.2], [cLat - off*0.2, cLon - off*0.5]
+      ], 
+      color: '#ff6b00', fillOpacity: 0.35, border: '#ff8a33' 
+    },
+    { 
+      // Northern Bordering Zone
+      coords: [
+        [cLat + off*0.9, cLon - off*0.4], [cLat + off*1.8, cLon - off*0.5], 
+        [cLat + off*2.4, cLon + off*0.2], [cLat + off*1.9, cLon + off*1.4], 
+        [cLat + off*1.2, cLon + off*1.6], [cLat + off*0.6, cLon + off*0.9], 
+        [cLat + off*1.1, cLon + off*0.3]
+      ], 
+      color: '#ef4444', fillOpacity: 0.25, border: '#f87171' 
+    },
+    { 
+      // Eastern Bordering Zone
+      coords: [
+        [cLat - off*0.3, cLon + off*1.2], [cLat + off*0.6, cLon + off*0.9], 
+        [cLat + off*1.2, cLon + off*1.6], [cLat + off*0.8, cLon + off*2.6], 
+        [cLat - off*0.5, cLon + off*2.8], [cLat - off*1.1, cLon + off*1.5], 
+        [cLat - off*0.8, cLon + off*0.4]
+      ], 
+      color: '#3b82f6', fillOpacity: 0.25, border: '#60a5fa' 
+    }
   ];
+
   zones.forEach(z => {
     const polygon = L.polygon(z.coords, {
       color: z.border, weight: 2, fillColor: z.color, fillOpacity: z.fillOpacity, className: 'territory-polygon'
@@ -404,7 +435,16 @@ function startRun() {
   runState.gpsActive = false; runState.gpsError = false;
   runState.capturedCells = new Set(); runState.totalCaptured = 0;
   runState.pace = '--:--'; runState.calories = 0;
+  runState.pathCoords = [];
   navigateTo('map');
+  
+  // Initialize or clear the route tracing line
+  if (mapInstance) {
+    if (runState.routeLine) {
+      mapInstance.removeLayer(runState.routeLine);
+    }
+    runState.routeLine = L.polyline([], { color: '#ff6b00', weight: 5, opacity: 0.8, smoothFactor: 1 }).addTo(mapInstance);
+  }
 
   // Start GPS tracking
   if ('geolocation' in navigator) {
@@ -449,6 +489,10 @@ function startRun() {
         if (mapInstance && userMarker) {
           userMarker.setLatLng([latitude, longitude]);
           mapInstance.panTo([latitude, longitude]);
+          runState.pathCoords.push([latitude, longitude]);
+          if (runState.routeLine) {
+            runState.routeLine.setLatLngs(runState.pathCoords);
+          }
         }
         // Update GPS status indicator
         const gpsEl = document.getElementById('gps-indicator');
@@ -490,6 +534,10 @@ function startRun() {
       if (mapInstance && userMarker) {
         userMarker.setLatLng([runState.lastPos.lat, runState.lastPos.lon]);
         mapInstance.panTo([runState.lastPos.lat, runState.lastPos.lon]);
+        runState.pathCoords.push([runState.lastPos.lat, runState.lastPos.lon]);
+        if (runState.routeLine) {
+          runState.routeLine.setLatLngs(runState.pathCoords);
+        }
       }
 
       const newCells = Math.floor(runState.distance / 0.2);
