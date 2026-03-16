@@ -153,12 +153,12 @@ function renderHome() {
       <div class="kingdom-map">
         <div class="grid-lines"></div>
         <div class="kingdom-castle"><span>🏰</span></div>
-        <div class="kingdom-label">YOUR KINGDOM</div>
+        <div class="kingdom-label">YOUR TERRITORY</div>
         <button class="kingdom-cta" onclick="window._nav('map')">View Map →</button>
       </div>
       <div class="kingdom-info">
-        <div class="font-semibold text-sm">Sector 7 - Downtown District</div>
-        <div class="text-muted text-xs mt-1">${player.territories} zones captured</div>
+        <div class="font-semibold text-sm">Zone 1 - Local District</div>
+        <div class="text-muted text-xs mt-1">${player.territories} sectors captured</div>
       </div>
     </div>
 
@@ -247,10 +247,13 @@ function renderMap() {
     </div>
 
     ${isR ? `
-      <div class="flex flex-row justify-between items-center mb-3">
-        <div id="gps-indicator" class="gps-status ${runState.gpsActive ? '' : runState.gpsError ? 'gps-error' : ''}"><div class="gps-dot"></div>${runState.gpsActive ? 'GPS Active' : runState.gpsError ? 'GPS unavailable — using simulation' : 'Acquiring GPS...'}</div>
-      </div>
       <div class="card live-stats">
+        <div id="gps-indicator" class="gps-status ${runState.gpsActive ? '' : runState.gpsError ? 'gps-error' : 'gps-warn'}">
+          <div class="gps-dot"></div>
+          ${runState.gpsActive ? 'GPS Active' : runState.gpsError ? 'Simulation Active (GPS Error)' : 'Acquiring GPS...'}
+        </div>
+      </div>
+      <div class="card live-stats mt-2">
         <div class="flex flex-row mb-3">
           <div class="live-stat-item"><div class="live-stat-value" id="run-dist">${runState.distance.toFixed(2)} km</div><div class="live-stat-label">Distance</div></div>
           <div class="live-stat-item"><div class="live-stat-value" id="run-pace">${runState.pace}</div><div class="live-stat-label">Pace /km</div></div>
@@ -261,7 +264,7 @@ function renderMap() {
             <span class="font-semibold text-sm">🏴 Sector Capture</span>
             <span class="text-orange font-bold" id="capture-pct">${runState.captureProgress.toFixed(0)}%</span>
           </div>
-          <div class="text-xs text-muted mb-2">Central Park North · Zone 4</div>
+          <div class="text-xs text-muted mb-2">Zone 1 - Sector 4</div>
           <div class="progress-track" style="height:8px"><div class="progress-fill" id="capture-bar" style="width:${runState.captureProgress}%"></div></div>
           <div class="text-xs text-dim mt-1" id="capture-remaining">${(100-runState.captureProgress).toFixed(0)}% remaining to capture</div>
         </div>
@@ -334,19 +337,64 @@ function initMapInteractions() {
   const mapEl = document.getElementById('leaflet-map');
   if (mapEl && window.L) {
     if (mapInstance) { mapInstance.remove(); }
-    const centerLat = runState.lastPos ? runState.lastPos.lat : 40.7829;
-    const centerLon = runState.lastPos ? runState.lastPos.lon : -73.9654;
+    const centerLat = runState.lastPos ? runState.lastPos.lat : 0;
+    const centerLon = runState.lastPos ? runState.lastPos.lon : 0;
     
-    mapInstance = L.map('leaflet-map', { zoomControl: false, attributionControl: false }).setView([centerLat, centerLon], 15);
+    mapInstance = L.map('leaflet-map', { zoomControl: false, attributionControl: false }).setView([centerLat, centerLon], centerLat === 0 ? 2 : 15);
+
+    function updateMapLocation(lat, lon) {
+      runState.lastPos = { lat, lon };
+      if (mapInstance) {
+        mapInstance.setView([lat, lon], 15);
+      }
+      if (userMarker) {
+        userMarker.setLatLng([lat, lon]);
+      } else {
+        const markerHtml = `<div style="width:16px;height:16px;background:var(--orange);border-radius:50%;border:2px solid #fff;box-shadow:0 0 15px var(--orange);animation:pulse 2s infinite"></div>`;
+        const userIcon = L.divIcon({ html: markerHtml, className: '', iconSize: [16, 16], iconAnchor: [8, 8] });
+        userMarker = L.marker([lat, lon], { icon: userIcon }).addTo(mapInstance);
+      }
+      drawTerritories(lat, lon);
+    }
+
+    // Handlers for initial location fetch
+    if (centerLat === 0) {
+      const fallbackToIP = () => {
+        fetch('https://ipapi.co/json/')
+          .then(res => res.json())
+          .then(data => {
+            if (data.latitude && data.longitude && (!runState.lastPos || runState.lastPos.lat === 0)) {
+              updateMapLocation(data.latitude, data.longitude);
+            }
+          }).catch(e => console.error('IP Geolocation failed:', e));
+      };
+
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          p => {
+            updateMapLocation(p.coords.latitude, p.coords.longitude);
+          },
+          err => {
+            console.warn('Native GPS failed, falling back to IP:', err);
+            fallbackToIP();
+          },
+          { timeout: 5000, enableHighAccuracy: true }
+        );
+      } else {
+        fallbackToIP();
+      }
+    }
+
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       subdomains: 'abcd', maxZoom: 20
     }).addTo(mapInstance);
 
-    drawTerritories(centerLat, centerLon);
-
-    const markerHtml = `<div style="width:16px;height:16px;background:var(--orange);border-radius:50%;border:2px solid #fff;box-shadow:0 0 15px var(--orange);animation:pulse 2s infinite"></div>`;
-    const userIcon = L.divIcon({ html: markerHtml, className: '', iconSize: [16, 16], iconAnchor: [8, 8] });
-    userMarker = L.marker([centerLat, centerLon], { icon: userIcon }).addTo(mapInstance);
+    if (centerLat !== 0) {
+      drawTerritories(centerLat, centerLon);
+      const markerHtml = `<div style="width:16px;height:16px;background:var(--orange);border-radius:50%;border:2px solid #fff;box-shadow:0 0 15px var(--orange);animation:pulse 2s infinite"></div>`;
+      const userIcon = L.divIcon({ html: markerHtml, className: '', iconSize: [16, 16], iconAnchor: [8, 8] });
+      userMarker = L.marker([centerLat, centerLon], { icon: userIcon }).addTo(mapInstance);
+    }
   }
 }
 
@@ -436,7 +484,7 @@ function startRun() {
       runState.captureProgress = Math.min(runState.captureProgress + 0.3, 100);
       runState.calories = Math.round(runState.distance * 60);
       
-      if(!runState.lastPos) runState.lastPos = {lat: 40.7829, lon: -73.9654};
+      if(!runState.lastPos) runState.lastPos = {lat: 0, lon: 0};
       runState.lastPos.lat += 0.00005;
       runState.lastPos.lon += 0.00008;
       if (mapInstance && userMarker) {
@@ -477,7 +525,7 @@ function startRun() {
     // Check if sector fully captured
     if (runState.captureProgress >= 100 && !runState._sectorCaptured) {
       runState._sectorCaptured = true;
-      showToast('🏰', 'SECTOR CAPTURED!', 'Central Park North · Zone 4 is now yours! +500 XP');
+      showToast('🏰', 'SECTOR CAPTURED!', 'Zone 4 is now yours! +500 XP');
     }
   }, 1000);
 }
@@ -489,9 +537,28 @@ function stopRun() {
     navigator.geolocation.clearWatch(runState.gpsWatchId);
     runState.gpsWatchId = null;
   }
-  runState._sectorCaptured = false;
   if (runState.distance > 0) {
-    showToast('🏃', 'Run Complete!', `${runState.distance.toFixed(2)} km · ${fmtTime(runState.elapsed)} · +${Math.round(runState.distance * 25)} XP`);
+    const xp = Math.round(runState.distance * 25);
+    const durationArr = fmtTime(runState.elapsed).split(':');
+    const displayDuration = durationArr.length > 2 ? fmtTime(runState.elapsed) : `00:${fmtTime(runState.elapsed)}`;
+    
+    // Persist to today's stats
+    todayStats.distance = +(todayStats.distance + runState.distance).toFixed(2);
+    todayStats.calories += runState.calories;
+    todayStats.xp += xp; // Update player XP too
+    player.xp += xp;
+    
+    // Add to history
+    recentRuns.unshift({
+      id: Date.now(),
+      date: 'Just Now',
+      distance: runState.distance.toFixed(2),
+      zones: runState.totalCaptured || 0,
+      xp: xp,
+      duration: fmtTime(runState.elapsed)
+    });
+
+    showToast('🏃', 'Run Complete!', `${runState.distance.toFixed(2)} km · ${fmtTime(runState.elapsed)} · +${xp} XP`);
   }
 }
 

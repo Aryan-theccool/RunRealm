@@ -30,7 +30,7 @@ export default function MapScreen({ navigation }) {
   const [elapsed, setElapsed] = useState(0);
   const [distance, setDistance] = useState(0);
   const [captureProgress, setCaptureProgress] = useState(12);
-  const [currentSector] = useState('Central Park North · Zone 4');
+  const [currentSector] = useState('Zone 1 · Sector 4');
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const timerRef = useRef(null);
 
@@ -156,15 +156,15 @@ export default function MapScreen({ navigation }) {
             <View className="bg-zinc-800 rounded-2xl p-4 mb-4 border border-orange-500/30">
               <View className="flex-row justify-between mb-4">
                 <View className="items-center">
-                  <Text className="text-white font-bold text-xl">{distance.toFixed(1)} km</Text>
+                  <Text className="text-white font-bold text-xl">{distance.toFixed(2)} km</Text>
                   <Text className="text-zinc-500 text-xs">DISTANCE</Text>
                 </View>
                 <View className="items-center">
-                  <Text className="text-white font-bold text-xl">5:12</Text>
+                  <Text className="text-white font-bold text-xl">{distance > 0 ? `${Math.floor(elapsed / distance / 60)}:${String(Math.floor((elapsed / distance) % 60)).padStart(2, '0')}` : '--:--'}</Text>
                   <Text className="text-zinc-500 text-xs">PACE /km</Text>
                 </View>
                 <View className="items-center">
-                  <Text className="text-orange-400 font-bold text-xl">CP North</Text>
+                  <Text className="text-orange-400 font-bold text-xl">Zone 1</Text>
                   <Text className="text-zinc-500 text-xs">SECTOR</Text>
                 </View>
               </View>

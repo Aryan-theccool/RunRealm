@@ -66,7 +66,7 @@ export default function HomeScreen({ navigation }) {
                 <Text className="text-2xl -rotate-45">🏰</Text>
               </View>
               <View className="absolute top-3 left-3 bg-zinc-900/80 rounded-lg px-2 py-1">
-                <Text className="text-orange-400 text-xs font-bold">YOUR KINGDOM</Text>
+                <Text className="text-orange-400 text-xs font-bold">YOUR TERRITORY</Text>
               </View>
               <TouchableOpacity
                 className="absolute bottom-3 right-3 bg-orange-500 rounded-xl px-3 py-1.5"
@@ -76,8 +76,8 @@ export default function HomeScreen({ navigation }) {
               </TouchableOpacity>
             </View>
             <View className="px-4 py-3">
-              <Text className="text-white font-semibold text-sm">Sector 7 - Downtown District</Text>
-              <Text className="text-zinc-400 text-xs mt-0.5">{player.territories} zones captured</Text>
+              <Text className="text-white font-semibold text-sm">Zone 1 - Local District</Text>
+              <Text className="text-zinc-400 text-xs mt-0.5">{player.territories} sectors captured</Text>
             </View>
           </View>
 
